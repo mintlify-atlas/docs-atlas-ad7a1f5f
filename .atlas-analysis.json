@@ -1,0 +1,80 @@
+{
+  "projectType": "api-service",
+  "projectName": "SKU Semantic Search",
+  "projectDescription": "RAG-powered semantic search API for product discovery using vector embeddings and multi-LLM failover",
+  "theme": "aspen",
+  "primaryColor": "#00a393",
+  "lightColor": "#039be5",
+  "darkColor": "#fb8c00",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/rag-pattern",
+              "concepts/vector-search",
+              "concepts/multi-llm-failover"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/setup",
+              "guides/configuration",
+              "guides/seeding-data",
+              "guides/authentication"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/login"
+            ]
+          },
+          {
+            "group": "Products",
+            "pages": [
+              "api/products/create",
+              "api/products/search"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Semantic search using vector embeddings (Google Gemini)",
+    "RAG pattern for grounded AI recommendations",
+    "Multi-LLM failover (Gemini → Claude)",
+    "PostgreSQL with pgvector for cosine similarity search",
+    "FastAPI with Pydantic validation",
+    "JWT authentication"
+  ],
+  "publicApiSurface": [
+    "POST /auth/login",
+    "POST /products/",
+    "POST /products/search"
+  ]
+}
