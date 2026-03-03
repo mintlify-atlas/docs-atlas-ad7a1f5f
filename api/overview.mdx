@@ -17,18 +17,14 @@ http://localhost:8000
 
 ## Authentication
 
-The SKU Semantic Search API uses **OAuth2 with Bearer tokens** for authentication. To access protected endpoints:
+The SKU Semantic Search API uses **OAuth2 with Bearer tokens** for authentication. Currently, authentication is implemented for the `/auth/login` endpoint, which returns a JWT token. However, product endpoints (`/products/` and `/products/search`) do not require authentication in this proof-of-concept implementation.
 
-1. Obtain an access token by calling the `/auth/login` endpoint with valid credentials
-2. Include the token in the `Authorization` header for subsequent requests
-
-### Example authenticated request
+### Example login request
 
 ```bash
-curl -X POST http://localhost:8000/products/ \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Product Name", "description": "Description", "category": "Category"}'
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
 ```
 
 ## Common headers
@@ -38,10 +34,7 @@ Include these headers in your API requests:
 | Header | Value | Required | Description |
 |--------|-------|----------|-------------|
 | `Content-Type` | `application/json` | Yes | Specifies JSON request body |
-| `Authorization` | `Bearer {token}` | Yes* | Authentication token (required for protected endpoints) |
 | `Accept` | `application/json` | No | Specifies JSON response format |
-
-*Not required for `/auth/login` endpoint
 
 ## Response format
 
@@ -91,3 +84,36 @@ The API supports Cross-Origin Resource Sharing (CORS) and accepts requests from:
 - `http://localhost:4200` (default Angular development server)
 
 All HTTP methods and headers are allowed for configured origins.
+
+## Health check
+
+You can verify the API is running by accessing the root endpoint:
+
+```bash
+curl http://localhost:8000/
+```
+
+**Response:**
+```json
+{
+  "message": "API de Búsqueda Semántica de SKUs lista y Base de Datos conectada"
+}
+```
+
+## API endpoints
+
+The API provides the following endpoints:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Health check and API status |
+| `POST` | `/auth/login` | Authenticate and obtain JWT token |
+| `POST` | `/products/` | Create a new product with embeddings |
+| `POST` | `/products/search` | Semantic search with AI recommendations |
+
+## Interactive documentation
+
+FastAPI automatically generates interactive API documentation:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc

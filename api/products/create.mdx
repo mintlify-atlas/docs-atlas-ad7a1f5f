@@ -12,7 +12,7 @@ POST /products/
 Creates a new product in the database and automatically generates semantic embeddings for intelligent search. The product's name and description are combined to create a vector embedding that enables semantic similarity search.
 
 <Note>
-This endpoint requires authentication. Include a valid Bearer token in the Authorization header.
+This endpoint does not require authentication in the current implementation.
 </Note>
 
 ## Request body
@@ -53,7 +53,6 @@ This endpoint requires authentication. Include a valid Bearer token in the Autho
 
 ```bash cURL
 curl -X POST http://localhost:8000/products/ \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Wireless Bluetooth Headphones",
@@ -67,7 +66,6 @@ import requests
 
 url = "http://localhost:8000/products/"
 headers = {
-    "Authorization": "Bearer YOUR_ACCESS_TOKEN",
     "Content-Type": "application/json"
 }
 data = {
@@ -92,7 +90,6 @@ const product = {
 fetch('http://localhost:8000/products/', {
   method: 'POST',
   headers: {
-    'Authorization': 'Bearer YOUR_ACCESS_TOKEN',
     'Content-Type': 'application/json',
   },
   body: JSON.stringify(product)
@@ -115,18 +112,6 @@ fetch('http://localhost:8000/products/', {
 ```
 
 ## Error responses
-
-<Expandable title="401 Unauthorized">
-
-Returned when the authentication token is missing or invalid.
-
-```json
-{
-  "detail": "Not authenticated"
-}
-```
-
-</Expandable>
 
 <Expandable title="422 Validation Error">
 
@@ -151,7 +136,7 @@ Returned when required fields are missing or have invalid types.
 When you create a product, the system automatically:
 
 1. **Combines text:** Concatenates the product name and description
-2. **Generates embedding:** Creates a high-dimensional vector representation using a sentence transformer model
+2. **Generates embedding:** Creates a 3072-dimensional vector representation using Google Gemini's `gemini-embedding-001` model
 3. **Stores vector:** Saves the embedding in a PostgreSQL database with pgvector extension
 4. **Enables search:** Makes the product immediately searchable via semantic similarity
 
