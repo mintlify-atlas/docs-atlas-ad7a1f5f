@@ -1,0 +1,187 @@
+---
+title: Create product
+description: Create a new product with automatic embedding generation
+---
+
+## Endpoint
+
+```
+POST /products/
+```
+
+Creates a new product in the database and automatically generates semantic embeddings for intelligent search. The product's name and description are combined to create a vector embedding that enables semantic similarity search.
+
+<Note>
+This endpoint requires authentication. Include a valid Bearer token in the Authorization header.
+</Note>
+
+## Request body
+
+<ParamField body="name" type="string" required>
+  The product name or SKU identifier
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Detailed description of the product, its features, and use cases
+</ParamField>
+
+<ParamField body="category" type="string" required>
+  Product category for classification (e.g., "Electronics", "Clothing", "Home & Garden")
+</ParamField>
+
+## Response
+
+<ResponseField name="id" type="integer" required>
+  Unique identifier assigned to the product
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  The product name
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  The product description
+</ResponseField>
+
+<ResponseField name="category" type="string" required>
+  The product category
+</ResponseField>
+
+## Example request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8000/products/ \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Wireless Bluetooth Headphones",
+    "description": "Premium over-ear headphones with active noise cancellation, 30-hour battery life, and crystal-clear audio quality. Perfect for music lovers and professionals.",
+    "category": "Electronics"
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:8000/products/"
+headers = {
+    "Authorization": "Bearer YOUR_ACCESS_TOKEN",
+    "Content-Type": "application/json"
+}
+data = {
+    "name": "Wireless Bluetooth Headphones",
+    "description": "Premium over-ear headphones with active noise cancellation, 30-hour battery life, and crystal-clear audio quality. Perfect for music lovers and professionals.",
+    "category": "Electronics"
+}
+
+response = requests.post(url, json=data, headers=headers)
+product = response.json()
+
+print(f"Created product with ID: {product['id']}")
+```
+
+```javascript JavaScript
+const product = {
+  name: "Wireless Bluetooth Headphones",
+  description: "Premium over-ear headphones with active noise cancellation, 30-hour battery life, and crystal-clear audio quality. Perfect for music lovers and professionals.",
+  category: "Electronics"
+};
+
+fetch('http://localhost:8000/products/', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_ACCESS_TOKEN',
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify(product)
+})
+.then(response => response.json())
+.then(data => console.log('Created product:', data));
+```
+
+</CodeGroup>
+
+## Example response
+
+```json
+{
+  "id": 42,
+  "name": "Wireless Bluetooth Headphones",
+  "description": "Premium over-ear headphones with active noise cancellation, 30-hour battery life, and crystal-clear audio quality. Perfect for music lovers and professionals.",
+  "category": "Electronics"
+}
+```
+
+## Error responses
+
+<Expandable title="401 Unauthorized">
+
+Returned when the authentication token is missing or invalid.
+
+```json
+{
+  "detail": "Not authenticated"
+}
+```
+
+</Expandable>
+
+<Expandable title="422 Validation Error">
+
+Returned when required fields are missing or have invalid types.
+
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "name"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+```
+
+</Expandable>
+
+## Automatic embedding generation
+
+When you create a product, the system automatically:
+
+1. **Combines text:** Concatenates the product name and description
+2. **Generates embedding:** Creates a high-dimensional vector representation using a sentence transformer model
+3. **Stores vector:** Saves the embedding in a PostgreSQL database with pgvector extension
+4. **Enables search:** Makes the product immediately searchable via semantic similarity
+
+This process happens transparently in the background. You don't need to manually generate or provide embeddings.
+
+## Implementation details
+
+The endpoint is implemented in `app/api/endpoints/products.py:10`:
+
+```python
+@router.post("/", response_model=ProductResponse)
+def create_product(product_in: ProductCreate, db: Session = Depends(get_db)):
+    return ProductService.create_product(db, product_in)
+```
+
+The `ProductCreate` schema is defined in `app/schemas/product_schema.py:6`:
+
+```python
+class ProductCreate(BaseModel):
+    name: str
+    description: str
+    category: str
+```
+
+## Best practices
+
+<Tip>
+**Write detailed descriptions:** The quality of semantic search depends on the richness of product descriptions. Include features, use cases, and relevant keywords to improve search accuracy.
+</Tip>
+
+<Warning>
+**Avoid duplicate products:** Creating duplicate products will result in redundant search results. Check for existing products before creating new ones.
+</Warning>

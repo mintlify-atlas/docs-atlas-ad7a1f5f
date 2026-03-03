@@ -1,0 +1,333 @@
+---
+title: Seeding data
+description: Learn how to populate your database with product data and generate embeddings automatically
+---
+
+This guide shows you how to add products to your SKU Semantic Search database. The application automatically generates vector embeddings for each product using the Gemini API.
+
+## How embeddings are generated
+
+When you create a product, the application automatically:
+
+1. Combines the product name and description into a single text string
+2. Sends this text to the Gemini API to generate a vector embedding
+3. Stores the embedding in PostgreSQL using the pgvector extension
+
+Here's how this works in the `ProductService`:
+
+```python app/services/product_service.py
+from app.services.llm_service import LLMService
+
+class ProductService:
+    @staticmethod
+    def create_product(db: Session, product_in: ProductCreate):
+        # 1. Generate embedding from name and description
+        text_to_embed = f"{product_in.name}: {product_in.description}"
+        embedding = LLMService.get_embedding(text_to_embed)
+
+        # 2. Save to database
+        db_product = Product(
+            name=product_in.name,
+            description=product_in.description,
+            category=product_in.category,
+            embedding=embedding
+        )
+        db.add(db_product)
+        db.commit()
+        db.refresh(db_product)
+        return db_product
+```
+
+See `app/services/product_service.py:8-23` for the complete implementation.
+
+<Info>
+  Embeddings are vector representations that capture the semantic meaning of text, enabling similarity-based search
+</Info>
+
+## Using the seed script
+
+The project includes a `seed_data.py` script that loads sample products into your database.
+
+### Prerequisites
+
+Before running the seed script:
+
+<Steps>
+  <Step title="Ensure the API is running">
+    The seed script makes HTTP requests to the API, so it must be running:
+
+    ```bash
+    uvicorn app.main:app --reload
+    ```
+
+    Or with Docker Compose:
+
+    ```bash
+    docker-compose up
+    ```
+  </Step>
+
+  <Step title="Verify your GEMINI_API_KEY is set">
+    The script will fail if your API key is not configured:
+
+    ```bash
+    echo $GEMINI_API_KEY
+    ```
+
+    If empty, add it to your `.env` file and restart the API.
+  </Step>
+</Steps>
+
+### Run the seed script
+
+Execute the script from the project root:
+
+```bash
+python seed_data.py
+```
+
+You'll see output like:
+
+```
+🚀 Iniciando carga masiva de productos...
+✅ Agua Mineral 500ml guardado correctamente.
+✅ Jugo de Naranja 1L guardado correctamente.
+✅ Vino Tinto Malbec guardado correctamente.
+...
+✨ Proceso finalizado. 43 productos nuevos en la base de datos.
+```
+
+<Warning>
+  The script includes a 0.5-second delay between requests to avoid hitting Gemini API rate limits
+</Warning>
+
+### How the seed script works
+
+Here's the complete seed script workflow:
+
+```python seed_data.py
+import requests
+import time
+
+API_URL = "http://localhost:8000"
+USER = "admin"
+PASS = "admin123"
+
+def get_token():
+    """Obtiene el token JWT automáticamente"""
+    response = requests.post(
+        f"{API_URL}/auth/login",
+        data={"username": USER, "password": PASS}
+    )
+    if response.status_code == 200:
+        return response.json()["access_token"]
+    raise Exception("No se pudo obtener el token de acceso")
+
+def run_seed():
+    print("🚀 Iniciando carga masiva de productos...")
+    try:
+        token = get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        exitos = 0
+        for p in productos_base:
+            response = requests.post(
+                f"{API_URL}/products/", 
+                json=p, 
+                headers=headers
+            )
+            if response.status_code == 200:
+                print(f"✅ {p['name']} guardado correctamente.")
+                exitos += 1
+            else:
+                print(f"❌ Error en {p['name']}: {response.text}")
+            
+            # Delay to avoid rate limits
+            time.sleep(0.5)
+            
+        print(f"\n✨ Proceso finalizado. {exitos} productos nuevos.")
+        
+    except Exception as e:
+        print(f"🔴 Error fatal: {e}")
+```
+
+See `seed_data.py:9-91` for the full script including product data.
+
+### Sample products included
+
+The seed script includes products across multiple categories:
+
+- **Beverages**: Water, juices, wine, coffee, energy drinks
+- **Dairy**: Yogurt, cheese, butter, eggs
+- **Cleaning**: Floor cleaner, sponges, fabric softener, glass cleaner
+- **Personal care**: Shampoo, toothpaste, soap, deodorant, sunscreen
+- **Groceries**: Rice, pasta, oil, canned goods
+- **Snacks**: Crackers, chips, chocolate, jam
+- **Pet supplies**: Dog food, cat litter
+- **Household**: Batteries, napkins
+
+## Manual product creation
+
+You can also add products manually using the API.
+
+### Step 1: Obtain authentication token
+
+First, log in to get a JWT token:
+
+```bash
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
+```
+
+Response:
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+Save the `access_token` for the next request.
+
+### Step 2: Create a product
+
+Send a POST request to the `/products/` endpoint:
+
+```bash
+curl -X POST "http://localhost:8000/products/" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Organic Green Tea",
+    "description": "Premium organic green tea leaves with antioxidants",
+    "category": "Beverages"
+  }'
+```
+
+Response:
+
+```json
+{
+  "id": 1,
+  "name": "Organic Green Tea",
+  "description": "Premium organic green tea leaves with antioxidants",
+  "category": "Beverages",
+  "created_at": "2026-03-03T10:30:00"
+}
+```
+
+<Note>
+  The embedding is generated automatically and stored in the database, but it's not returned in the API response
+</Note>
+
+## Using the interactive API docs
+
+The easiest way to manually add products is through the Swagger UI:
+
+<Steps>
+  <Step title="Open the API documentation">
+    Navigate to http://localhost:8000/docs in your browser
+  </Step>
+
+  <Step title="Authenticate">
+    1. Click the "Authorize" button at the top right
+    2. Enter credentials:
+       - **username**: `admin`
+       - **password**: `admin123`
+    3. Click "Authorize" then "Close"
+  </Step>
+
+  <Step title="Create a product">
+    1. Expand the `POST /products/` endpoint
+    2. Click "Try it out"
+    3. Fill in the request body:
+       ```json
+       {
+         "name": "Your Product Name",
+         "description": "Detailed product description",
+         "category": "Category Name"
+       }
+       ```
+    4. Click "Execute"
+  </Step>
+
+  <Step title="View the response">
+    The response will include the created product with its ID and timestamp.
+  </Step>
+</Steps>
+
+## Bulk import from CSV or JSON
+
+You can modify the seed script to load products from a file:
+
+<CodeGroup>
+  ```python From JSON file
+  import json
+
+  with open('products.json', 'r') as f:
+      productos_base = json.load(f)
+
+  # Then run the seed process
+  run_seed()
+  ```
+
+  ```python From CSV file
+  import csv
+
+  productos_base = []
+  with open('products.csv', 'r') as f:
+      reader = csv.DictReader(f)
+      for row in reader:
+          productos_base.append({
+              "name": row['name'],
+              "description": row['description'],
+              "category": row['category']
+          })
+
+  # Then run the seed process
+  run_seed()
+  ```
+</CodeGroup>
+
+## Rate limiting considerations
+
+When seeding large datasets:
+
+<Warning>
+  The Gemini API has rate limits. The seed script includes a 0.5-second delay between requests:
+  
+  ```python
+  time.sleep(0.5)  # 500ms delay
+  ```
+
+  For larger datasets, you may need to increase this delay or implement exponential backoff.
+</Warning>
+
+## Verifying embeddings
+
+After adding products, you can verify that embeddings were created by performing a semantic search:
+
+```bash
+curl -X POST "http://localhost:8000/products/search" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "something refreshing to drink",
+    "limit": 5
+  }'
+```
+
+You should see relevant beverages in the results, demonstrating that the embeddings capture semantic meaning.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search API" icon="magnifying-glass" href="/api/products/search">
+    Learn how to search products using semantic queries
+  </Card>
+  <Card title="Authentication" icon="lock" href="/guides/authentication">
+    Understand JWT authentication for API access
+  </Card>
+</CardGroup>

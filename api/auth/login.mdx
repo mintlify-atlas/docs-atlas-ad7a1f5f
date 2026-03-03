@@ -1,0 +1,174 @@
+---
+title: Login
+description: Authenticate and obtain an access token
+---
+
+## Endpoint
+
+```
+POST /auth/login
+```
+
+Authenticates a user and returns a JWT access token for subsequent API requests.
+
+## Request body
+
+This endpoint uses OAuth2 password flow with form data (not JSON). Send credentials as `application/x-www-form-urlencoded`.
+
+<ParamField body="username" type="string" required>
+  The user's username
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's password
+</ParamField>
+
+<ParamField body="grant_type" type="string">
+  OAuth2 grant type (optional, defaults to "password")
+</ParamField>
+
+<ParamField body="scope" type="string">
+  OAuth2 scopes (optional)
+</ParamField>
+
+<ParamField body="client_id" type="string">
+  OAuth2 client ID (optional)
+</ParamField>
+
+<ParamField body="client_secret" type="string">
+  OAuth2 client secret (optional)
+</ParamField>
+
+## Response
+
+<ResponseField name="access_token" type="string" required>
+  The JWT access token to use for authenticated requests
+</ResponseField>
+
+<ResponseField name="token_type" type="string" required>
+  The token type (always "bearer")
+</ResponseField>
+
+## Example request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
+```
+
+```python Python
+import requests
+
+url = "http://localhost:8000/auth/login"
+data = {
+    "username": "admin",
+    "password": "admin123"
+}
+
+response = requests.post(url, data=data)
+token_data = response.json()
+
+print(f"Access Token: {token_data['access_token']}")
+```
+
+```javascript JavaScript
+const formData = new URLSearchParams();
+formData.append('username', 'admin');
+formData.append('password', 'admin123');
+
+fetch('http://localhost:8000/auth/login', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: formData
+})
+.then(response => response.json())
+.then(data => console.log('Access Token:', data.access_token));
+```
+
+</CodeGroup>
+
+## Example response
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTcwOTQ4MjgwMH0.example_signature",
+  "token_type": "bearer"
+}
+```
+
+## Error responses
+
+<Expandable title="401 Unauthorized">
+
+Returned when credentials are invalid.
+
+```json
+{
+  "detail": "Usuario o contraseña incorrectos"
+}
+```
+
+**Headers:**
+```
+WWW-Authenticate: Bearer
+```
+
+</Expandable>
+
+<Expandable title="422 Validation Error">
+
+Returned when required fields are missing or malformed.
+
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "username"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+```
+
+</Expandable>
+
+## Implementation details
+
+The endpoint is implemented in `app/api/endpoints/auth.py:14`:
+
+```python
+@router.post("/login", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    # Validar usuario
+    if form_data.username != USER_TEST["username"] or \
+       not Security.verify_password(form_data.password, USER_TEST["password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Generar Token
+    access_token = Security.create_access_token(data={"sub": form_data.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+```
+
+## Token configuration
+
+- **Algorithm:** HS256
+- **Expiration:** 30 minutes (configurable via `ACCESS_TOKEN_EXPIRE_MINUTES`)
+- **Secret:** Defined in environment variable `JWT_SECRET`
+
+## Using the token
+
+Include the token in the Authorization header for protected endpoints:
+
+```bash
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```

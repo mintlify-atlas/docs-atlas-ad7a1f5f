@@ -1,0 +1,458 @@
+---
+title: Authentication
+description: Implement JWT-based authentication for secure API access in SKU Semantic Search
+---
+
+The SKU Semantic Search API uses JWT (JSON Web Token) authentication to secure endpoints. This guide explains how to authenticate users and use tokens in requests.
+
+## Authentication overview
+
+The authentication system consists of three main components:
+
+1. **Security class**: Handles password hashing and JWT token creation
+2. **Login endpoint**: Validates credentials and issues tokens
+3. **Protected endpoints**: Require valid JWT tokens to access
+
+## Security implementation
+
+The `Security` class in `app/core/security.py` provides cryptographic functions:
+
+```python app/core/security.py
+from datetime import datetime, timedelta
+from typing import Optional
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from app.core.config import settings
+
+# Password hashing configuration
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class Security:
+    @staticmethod
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        return pwd_context.verify(plain_password, hashed_password)
+
+    @staticmethod
+    def get_password_hash(password: str) -> str:
+        return pwd_context.hash(password)
+
+    @staticmethod
+    def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(
+                minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            )
+        
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(
+            to_encode, 
+            settings.JWT_SECRET, 
+            algorithm=settings.ALGORITHM
+        )
+        return encoded_jwt
+```
+
+See `app/core/security.py:1-29` for the complete implementation.
+
+### Key features
+
+<CardGroup cols={2}>
+  <Card title="Password hashing" icon="shield-halved">
+    Uses bcrypt to securely hash passwords before storage
+  </Card>
+  <Card title="Token signing" icon="key">
+    Signs JWTs using HS256 algorithm with the configured secret
+  </Card>
+  <Card title="Expiration" icon="clock">
+    Tokens expire after 30 minutes (configurable)
+  </Card>
+  <Card title="Verification" icon="check">
+    Validates passwords against hashed versions
+  </Card>
+</CardGroup>
+
+## Login endpoint
+
+The login endpoint authenticates users and returns a JWT token:
+
+```python app/api/endpoints/auth.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from app.core.security import Security
+from app.schemas.auth_schema import Token
+
+router = APIRouter()
+
+# Test user (In production, query from database)
+USER_TEST = {
+    "username": "admin",
+    "password": Security.get_password_hash("admin123") 
+}
+
+@router.post("/login", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    # Validate user
+    if form_data.username != USER_TEST["username"] or \
+       not Security.verify_password(form_data.password, USER_TEST["password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Generate token
+    access_token = Security.create_access_token(data={"sub": form_data.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+```
+
+See `app/api/endpoints/auth.py:14-27` for the login implementation.
+
+<Warning>
+  The current implementation uses a hardcoded test user. In production, replace this with database authentication
+</Warning>
+
+## Token schema
+
+The authentication response follows this schema:
+
+```python app/schemas/auth_schema.py
+from pydantic import BaseModel
+from typing import Optional
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+```
+
+See `app/schemas/auth_schema.py:4-9`.
+
+## How to authenticate
+
+### Using cURL
+
+<Steps>
+  <Step title="Send login request">
+    Make a POST request to `/auth/login` with form data:
+
+    ```bash
+    curl -X POST "http://localhost:8000/auth/login" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -d "username=admin&password=admin123"
+    ```
+
+    <Info>
+      The endpoint uses `OAuth2PasswordRequestForm`, which expects form-encoded data, not JSON
+    </Info>
+  </Step>
+
+  <Step title="Receive token">
+    The response contains your access token:
+
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTcwOTQ2MTgwMH0.xyz...",
+      "token_type": "bearer"
+    }
+    ```
+  </Step>
+
+  <Step title="Use token in requests">
+    Include the token in the Authorization header:
+
+    ```bash
+    curl -X POST "http://localhost:8000/products/" \
+      -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Product Name",
+        "description": "Product description",
+        "category": "Category"
+      }'
+    ```
+  </Step>
+</Steps>
+
+### Using Python requests
+
+Here's how to authenticate programmatically:
+
+```python
+import requests
+
+API_URL = "http://localhost:8000"
+
+# Step 1: Login
+response = requests.post(
+    f"{API_URL}/auth/login",
+    data={
+        "username": "admin",
+        "password": "admin123"
+    }
+)
+
+if response.status_code == 200:
+    token = response.json()["access_token"]
+    
+    # Step 2: Use token
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Create a product
+    product = {
+        "name": "Green Tea",
+        "description": "Organic green tea with antioxidants",
+        "category": "Beverages"
+    }
+    
+    response = requests.post(
+        f"{API_URL}/products/",
+        json=product,
+        headers=headers
+    )
+    
+    print(response.json())
+else:
+    print("Authentication failed")
+```
+
+This pattern is used in `seed_data.py:9-17` for automated seeding.
+
+### Using the Swagger UI
+
+The easiest way to authenticate during development:
+
+<Steps>
+  <Step title="Open API docs">
+    Navigate to http://localhost:8000/docs
+  </Step>
+
+  <Step title="Click Authorize">
+    Click the "Authorize" button (lock icon) in the top right
+  </Step>
+
+  <Step title="Enter credentials">
+    Fill in the form:
+    - **username**: `admin`
+    - **password**: `admin123`
+    
+    Click "Authorize" then "Close"
+  </Step>
+
+  <Step title="Make authenticated requests">
+    All subsequent requests from the Swagger UI will include the token automatically
+  </Step>
+</Steps>
+
+## Token expiration
+
+Tokens expire after 30 minutes by default (configurable via `ACCESS_TOKEN_EXPIRE_MINUTES`).
+
+When a token expires, you'll receive a 401 Unauthorized response:
+
+```json
+{
+  "detail": "Could not validate credentials"
+}
+```
+
+Simply request a new token by logging in again.
+
+<Note>
+  For long-running processes like the seed script, implement token refresh logic or use a longer expiration time
+</Note>
+
+## Custom token expiration
+
+You can create tokens with custom expiration times:
+
+```python
+from datetime import timedelta
+from app.core.security import Security
+
+# Create token that expires in 1 hour
+custom_token = Security.create_access_token(
+    data={"sub": "admin"},
+    expires_delta=timedelta(hours=1)
+)
+```
+
+## Default credentials
+
+The application includes these default credentials for testing:
+
+<ParamField path="username" type="string" default="admin">
+  Default username
+</ParamField>
+
+<ParamField path="password" type="string" default="admin123">
+  Default password
+</ParamField>
+
+<Warning>
+  These credentials are hardcoded in `app/api/endpoints/auth.py:9-12`. Change them in production or implement database-backed authentication
+</Warning>
+
+## Implementing database authentication
+
+To use database-backed user authentication:
+
+<Steps>
+  <Step title="Create User model">
+    ```python app/models/user.py
+    from sqlalchemy import Column, Integer, String
+    from app.db.session import Base
+
+    class User(Base):
+        __tablename__ = "users"
+        
+        id = Column(Integer, primary_key=True, index=True)
+        username = Column(String, unique=True, index=True)
+        hashed_password = Column(String)
+    ```
+  </Step>
+
+  <Step title="Update login endpoint">
+    ```python
+    @router.post("/login", response_model=Token)
+    def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+        # Query user from database
+        user = db.query(User).filter(User.username == form_data.username).first()
+        
+        if not user or not Security.verify_password(form_data.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        access_token = Security.create_access_token(data={"sub": user.username})
+        return {"access_token": access_token, "token_type": "bearer"}
+    ```
+  </Step>
+
+  <Step title="Create user registration endpoint">
+    ```python
+    @router.post("/register")
+    def register(username: str, password: str, db: Session = Depends(get_db)):
+        # Check if user exists
+        if db.query(User).filter(User.username == username).first():
+            raise HTTPException(status_code=400, detail="Username already exists")
+        
+        # Create new user
+        hashed_password = Security.get_password_hash(password)
+        user = User(username=username, hashed_password=hashed_password)
+        db.add(user)
+        db.commit()
+        
+        return {"message": "User created successfully"}
+    ```
+  </Step>
+</Steps>
+
+## Protected endpoints
+
+Currently, the product endpoints require authentication. Here's how they're protected:
+
+```python
+from fastapi import Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from app.core.config import settings
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+```
+
+Use this dependency in endpoints:
+
+```python
+@router.post("/protected")
+def protected_route(current_user: str = Depends(get_current_user)):
+    return {"message": f"Hello {current_user}"}
+```
+
+## Security best practices
+
+<AccordionGroup>
+  <Accordion title="Use strong JWT secrets">
+    Generate a strong random secret for production:
+    
+    ```bash
+    python -c "import secrets; print(secrets.token_urlsafe(32))"
+    ```
+    
+    Never use the default secret in production.
+  </Accordion>
+
+  <Accordion title="Use HTTPS in production">
+    Always use HTTPS in production to prevent token interception.
+  </Accordion>
+
+  <Accordion title="Implement refresh tokens">
+    For better security, implement refresh tokens with shorter access token lifetimes.
+  </Accordion>
+
+  <Accordion title="Store tokens securely">
+    In frontend applications, store tokens in httpOnly cookies or secure storage, not localStorage.
+  </Accordion>
+
+  <Accordion title="Validate token claims">
+    Always verify token expiration and issuer claims.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### "Usuario o contraseña incorrectos"
+
+You're using incorrect credentials. Use:
+- **username**: `admin`
+- **password**: `admin123`
+
+### "Could not validate credentials"
+
+Your token has expired or is invalid. Log in again to get a new token.
+
+### "Expected content-type to be application/x-www-form-urlencoded"
+
+The login endpoint expects form data, not JSON. Use:
+
+```bash
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=admin123"
+```
+
+Not:
+
+```bash
+# This will fail
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Seeding data" icon="database" href="/guides/seeding-data">
+    Learn how the seed script uses authentication
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore all protected endpoints
+  </Card>
+</CardGroup>

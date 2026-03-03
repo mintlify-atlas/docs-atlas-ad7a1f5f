@@ -1,0 +1,264 @@
+---
+title: Search products
+description: Perform semantic search with AI-powered recommendations
+---
+
+## Endpoint
+
+```
+POST /products/search
+```
+
+Performs intelligent semantic search across products using vector similarity and returns AI-generated recommendations based on search results. This endpoint implements a Retrieval-Augmented Generation (RAG) pattern to provide contextual product suggestions.
+
+<Note>
+This endpoint requires authentication. Include a valid Bearer token in the Authorization header.
+</Note>
+
+## Request body
+
+<ParamField body="query" type="string" required>
+  Natural language search query describing what you're looking for
+</ParamField>
+
+<ParamField body="limit" type="integer" default="5">
+  Maximum number of results to return (defaults to 5)
+</ParamField>
+
+## Response
+
+<ResponseField name="query" type="string" required>
+  The original search query provided in the request
+</ResponseField>
+
+<ResponseField name="recommendation" type="string" required>
+  AI-generated recommendation based on the search query and retrieved products. Provides contextual insights about the most relevant products.
+</ResponseField>
+
+<ResponseField name="results" type="array" required>
+  Array of product objects matching the search query, ordered by relevance
+  
+  <Expandable title="Product object">
+    <ResponseField name="id" type="integer">
+      Unique product identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Product name
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Product description
+    </ResponseField>
+    
+    <ResponseField name="category" type="string">
+      Product category
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example request
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST http://localhost:8000/products/search \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "noise cancelling headphones for travel",
+    "limit": 3
+  }'
+```
+
+```python Python
+import requests
+
+url = "http://localhost:8000/products/search"
+headers = {
+    "Authorization": "Bearer YOUR_ACCESS_TOKEN",
+    "Content-Type": "application/json"
+}
+data = {
+    "query": "noise cancelling headphones for travel",
+    "limit": 3
+}
+
+response = requests.post(url, json=data, headers=headers)
+search_results = response.json()
+
+print(f"AI Recommendation: {search_results['recommendation']}")
+print(f"Found {len(search_results['results'])} products")
+```
+
+```javascript JavaScript
+const searchQuery = {
+  query: "noise cancelling headphones for travel",
+  limit: 3
+};
+
+fetch('http://localhost:8000/products/search', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer YOUR_ACCESS_TOKEN',
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify(searchQuery)
+})
+.then(response => response.json())
+.then(data => {
+  console.log('AI Recommendation:', data.recommendation);
+  console.log('Products:', data.results);
+});
+```
+
+</CodeGroup>
+
+## Example response
+
+```json
+{
+  "query": "noise cancelling headphones for travel",
+  "recommendation": "Based on your search for noise cancelling headphones for travel, I recommend the Wireless Bluetooth Headphones. These premium over-ear headphones feature active noise cancellation technology, which is perfect for blocking out ambient noise during flights and commutes. With a 30-hour battery life, you won't need to worry about charging during long trips. The crystal-clear audio quality ensures an immersive listening experience whether you're enjoying music or taking calls.",
+  "results": [
+    {
+      "id": 42,
+      "name": "Wireless Bluetooth Headphones",
+      "description": "Premium over-ear headphones with active noise cancellation, 30-hour battery life, and crystal-clear audio quality. Perfect for music lovers and professionals.",
+      "category": "Electronics"
+    },
+    {
+      "id": 38,
+      "name": "Compact Travel Earbuds",
+      "description": "Lightweight in-ear headphones with passive noise isolation and 20-hour playtime. Ideal for travelers and commuters.",
+      "category": "Electronics"
+    },
+    {
+      "id": 51,
+      "name": "Studio Monitor Headphones",
+      "description": "Professional-grade closed-back headphones with superior sound isolation and accurate audio reproduction.",
+      "category": "Electronics"
+    }
+  ]
+}
+```
+
+## Error responses
+
+<Expandable title="401 Unauthorized">
+
+Returned when the authentication token is missing or invalid.
+
+```json
+{
+  "detail": "Not authenticated"
+}
+```
+
+</Expandable>
+
+<Expandable title="422 Validation Error">
+
+Returned when the query field is missing or has an invalid type.
+
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "query"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+```
+
+</Expandable>
+
+## How semantic search works
+
+The search endpoint uses a sophisticated Retrieval-Augmented Generation (RAG) process:
+
+### 1. Query embedding
+
+Your natural language query is converted into a high-dimensional vector using the same embedding model used for products.
+
+### 2. Vector similarity search
+
+The system performs a cosine similarity search in the vector database to find products with embeddings closest to your query embedding. This enables semantic matching beyond simple keyword search.
+
+**Example:** A query for "wireless audio device" will match products with "Bluetooth headphones" even though the exact words differ.
+
+### 3. Result retrieval
+
+The most similar products (up to the specified limit) are retrieved from the database, ordered by relevance score.
+
+### 4. Context aggregation
+
+Product information is aggregated into a context string:
+
+```python
+context = ". ".join([f"{p.name}: {p.description}" for p in products_db])
+```
+
+### 5. AI recommendation generation
+
+The query and product context are sent to a Large Language Model (LLM) that generates a personalized recommendation explaining which products best match your needs and why.
+
+## Implementation details
+
+The endpoint is implemented in `app/api/endpoints/products.py:14`:
+
+```python
+@router.post("/search", response_model=SearchResultResponse)
+def search_products(search_data: ProductSearchQuery, db: Session = Depends(get_db)):
+    # 1. Vector similarity search
+    products_db = ProductService.search_products(db, search_data.query, limit=search_data.limit)
+    
+    # 2. Build context and generate AI recommendation
+    context = ". ".join([f"{p.name}: {p.description}" for p in products_db])
+    ai_recommendation = LLMService.generate_answer(search_data.query, context)
+    
+    # 3. Return structured response
+    return {
+        "query": search_data.query,
+        "recommendation": ai_recommendation,
+        "results": products_db
+    }
+```
+
+The schemas are defined in `app/schemas/product_schema.py:22-30`:
+
+```python
+class ProductSearchQuery(BaseModel):
+    query: str
+    limit: int = 5
+
+class SearchResultResponse(BaseModel):
+    query: str
+    recommendation: str
+    results: List[ProductResponse]
+```
+
+## Search tips
+
+<Tip>
+**Use natural language:** Describe what you're looking for conversationally. The semantic search understands intent, not just keywords.
+
+**Examples:**
+- "comfortable headphones for long flights"
+- "gift for someone who loves cooking"
+- "durable laptop for software development"
+</Tip>
+
+<Tip>
+**Adjust the limit:** Start with a small limit (3-5) for quick results, or increase it (10-20) for comprehensive exploration.
+</Tip>
+
+## Performance considerations
+
+- **Embedding generation:** Query embedding is generated on each request (~50-200ms)
+- **Vector search:** Highly optimized using pgvector extension (~10-50ms for millions of vectors)
+- **LLM generation:** AI recommendations add ~1-3 seconds depending on the model and result count
+
+For faster responses without AI recommendations, consider implementing a lightweight search endpoint that skips the LLM generation step.

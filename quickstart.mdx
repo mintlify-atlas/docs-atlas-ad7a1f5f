@@ -1,80 +1,452 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get the SKU Semantic Search API running locally
 ---
 
-## Get started in three steps
+# Quickstart guide
 
-Get your documentation site running locally and make your first customization.
+Get the semantic search API running on your local machine in under 10 minutes.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+Before starting, ensure you have:
+
+- Python 3.13 or higher
+- Docker and Docker Compose
+- Git
+- API keys for Google Gemini and Anthropic Claude
+
+<Warning>
+You need both **Google Gemini** and **Anthropic** API keys for the failover system to work properly. Get them from:
+- [Google AI Studio](https://makersuite.google.com/app/apikey)
+- [Anthropic Console](https://console.anthropic.com/)
+</Warning>
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the project and navigate to the source directory:
+
+    ```bash
+    git clone https://github.com/your-username/sku-semantic-search.git
+    cd sku-semantic-search
+    ```
+  </Step>
+
+  <Step title="Create virtual environment">
+    Set up a Python virtual environment and install dependencies:
+
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
+
+    <Info>
+    The project uses key dependencies:
+    - **fastapi** - High-performance async web framework
+    - **google-generativeai** - Gemini embeddings and chat
+    - **anthropic** - Claude fallback provider
+    - **sqlalchemy** - Database ORM
+    - **pgvector** - Python client for vector operations
+    - **psycopg2-binary** - PostgreSQL adapter
+    </Info>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the project root with your credentials:
+
+    ```bash .env
+    PROJECT_NAME="SKU Semantic Search"
+    VERSION="1.0.0"
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    # Database connection
+    DATABASE_URL="postgresql://postgres:db_pass@localhost:5435/retail_rag"
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    # AI provider credentials
+    GEMINI_API_KEY="your_google_gemini_api_key_here"
+    ANTHROPIC_API_KEY="your_anthropic_api_key_here"
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    # JWT authentication
+    JWT_SECRET="your_secure_random_secret_key_here"
+    ALGORITHM="HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES=30
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    <Tip>
+    Generate a secure JWT secret using: `python -c "import secrets; print(secrets.token_hex(32))"`
+    </Tip>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    The configuration is loaded via Pydantic settings in `app/core/config.py`:
 
-### Step 3: Go live
+    ```python app/core/config.py
+    from pydantic_settings import BaseSettings
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    class Settings(BaseSettings):
+        PROJECT_NAME: str = "SKU Semantic Search"
+        VERSION: str = "1.0.0"
+        
+        DATABASE_URL: str
+        GEMINI_API_KEY: str
+        ANTHROPIC_API_KEY: str
+        JWT_SECRET: str
+        ALGORITHM: str = "HS256"
+        ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+        class Config:
+            env_file = ".env"
+            env_file_encoding = 'utf-8'
+    ```
+  </Step>
+
+  <Step title="Start the database">
+    Launch PostgreSQL with pgvector extension using Docker Compose:
+
+    ```bash
+    docker-compose up -d db
+    ```
+
+    This starts a PostgreSQL 16 container with pgvector:
+
+    ```yaml docker-compose.yml
+    db:
+      image: pgvector/pgvector:pg16
+      container_name: retail_rag_db
+      ports:
+        - "5435:5432"
+      environment:
+        - POSTGRES_USER=postgres
+        - POSTGRES_PASSWORD=db_pass
+        - POSTGRES_DB=retail_rag
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+    ```
+
+    <Info>
+    The database runs on port **5435** to avoid conflicts with existing PostgreSQL installations.
+    </Info>
+
+    Wait for the health check to pass:
+
+    ```bash
+    docker-compose ps
+    ```
+
+    You should see the database status as "healthy".
+  </Step>
+
+  <Step title="Start the API server">
+    Run the FastAPI application with hot reload:
+
+    ```bash
+    python -m uvicorn app.main:app --reload
+    ```
+
+    The server starts on `http://localhost:8000`. On startup, it automatically:
+    - Creates the pgvector extension
+    - Initializes database tables
+    - Sets up CORS middleware
+
+    ```python app/main.py
+    from fastapi import FastAPI
+    from sqlalchemy import text
+    from app.core.config import settings
+    from app.db.session import engine, Base
+
+    def create_tables():
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+        Base.metadata.create_all(bind=engine)
+
+    app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION)
+    create_tables()
+    ```
+  </Step>
+
+  <Step title="Seed the database (optional)">
+    Load sample products to test semantic search:
+
+    ```bash
+    python seed_data.py
+    ```
+
+    This script:
+    - Authenticates with the API (default credentials: `admin/admin123`)
+    - Creates 40+ sample products across categories (beverages, dairy, cleaning, personal care, snacks, pet supplies)
+    - Generates vector embeddings for each product
+
+    <Warning>
+    The seeding process calls the Gemini API for each product embedding. Add a delay between requests to avoid rate limits:
+    
+    ```python
+    time.sleep(0.5)  # Wait 500ms between products
+    ```
+    </Warning>
+  </Step>
+</Steps>
+
+## Verify installation
+
+Check that the API is running:
+
+```bash
+curl http://localhost:8000/
+```
+
+Expected response:
+
+```json
+{
+  "message": "API de Búsqueda Semántica de SKUs lista y Base de Datos conectada"
+}
+```
+
+View the interactive API documentation at:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+## Your first search
+
+Now let's perform a semantic search query to see the magic in action.
+
+<Steps>
+  <Step title="Authenticate">
+    Get an access token (default credentials for testing):
+
+    ```bash
+    curl -X POST "http://localhost:8000/auth/login" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -d "username=admin&password=admin123"
+    ```
+
+    Save the `access_token` from the response.
+  </Step>
+
+  <Step title="Search for products">
+    Search using natural language (notice: we're asking for "something to clean the floor" not "mop"):
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST "http://localhost:8000/products/search" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+      -d '{
+        "query": "something to clean the floor",
+        "limit": 5
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "http://localhost:8000/products/search",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "something to clean the floor", "limit": 5}
+    )
+
+    print(response.json())
+    ```
+
+    ```javascript JavaScript
+    const response = await fetch('http://localhost:8000/products/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        query: 'something to clean the floor',
+        limit: 5
+      })
+    });
+
+    const data = await response.json();
+    console.log(data);
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Understand the response">
+    The API returns semantically relevant products with an AI-generated recommendation:
+
+    ```json Response
+    {
+      "query": "something to clean the floor",
+      "recommendation": "[GOOGLE - models/gemini-2.5-flash] For floor cleaning, I recommend the Desinfectante de Pisos with lavender fragrance that eliminates 99% of bacteria, or the Esponja de Cocina with abrasive fiber for tough dirt.",
+      "results": [
+        {
+          "id": 15,
+          "name": "Desinfectante de Pisos",
+          "description": "Líquido fragancia lavanda, elimina el 99% de bacterias.",
+          "category": "Limpieza"
+        },
+        {
+          "id": 16,
+          "name": "Esponja de Cocina",
+          "description": "Doble cara con fibra abrasiva para suciedad difícil.",
+          "category": "Limpieza"
+        }
+      ]
+    }
+    ```
+
+    <Info>
+    Notice how the recommendation includes:
+    - The provider and model used (e.g., `[GOOGLE - models/gemini-2.5-flash]`)
+    - Context-aware suggestions based on retrieved products
+    - No hallucinated products - only items from the database
+    </Info>
+  </Step>
+</Steps>
+
+## How the search works
+
+The `/products/search` endpoint implements the RAG pattern in `app/api/endpoints/products.py:14`:
+
+```python app/api/endpoints/products.py
+@router.post("/search", response_model=SearchResultResponse)
+def search_products(search_data: ProductSearchQuery, db: Session = Depends(get_db)):
+    # 1. Vector similarity search in PostgreSQL
+    products_db = ProductService.search_products(db, search_data.query, limit=search_data.limit)
+    
+    # 2. Assemble context from retrieved products
+    context = ". ".join([f"{p.name}: {p.description}" for p in products_db])
+    
+    # 3. Generate AI recommendation using RAG
+    ai_recommendation = LLMService.generate_answer(search_data.query, context)
+    
+    # 4. Return structured response
+    return {
+        "query": search_data.query,
+        "recommendation": ai_recommendation,
+        "results": products_db
+    }
+```
+
+The LLM service handles multi-provider failover automatically (app/services/llm_service.py:64):
+
+```python app/services/llm_service.py
+@staticmethod
+def generate_answer(query: str, context: str) -> str:
+    prompt = (
+        f"Eres un analista de Listo ERP. Basado en este contexto:\n{context}\n\n"
+        f"Pregunta: {query}\nRespuesta profesional y breve:"
+    )
+
+    for entry in LLMService.LLM_CONFIG:
+        provider = entry["provider"]
+        for model_name in entry["models"]:
+            try:
+                if provider == "google":
+                    res = LLMService._call_google(model_name, prompt)
+                elif provider == "anthropic":
+                    res = LLMService._call_anthropic(model_name, prompt)
+                
+                return f"[{provider.upper()} - {model_name}] {res}"
+            
+            except (APIStatusError, APIConnectionError) as e:
+                print(f"⚠️ Error in {provider} ({model_name}): {e}")
+                continue
+    
+    return "Lo sentimos, el servicio de recomendaciones no está disponible."
+```
+
+## Test the failover
+
+To see the multi-LLM failover in action, temporarily set an invalid Gemini API key in your `.env` file. The system will automatically fall back to Claude:
+
+```bash
+GEMINI_API_KEY="invalid_key"
+```
+
+Restart the server and make a search request. The response will show:
+
+```json
+{
+  "recommendation": "[ANTHROPIC - claude-3-haiku-20240307] ..."
+}
+```
+
+<Tip>
+Check the server logs to see the failover in action:
+```
+⚠️ Error in google (models/gemini-2.5-flash): API key invalid
+⚠️ Error in google (models/gemini-flash-latest): API key invalid
+⚠️ Error in google (models/gemini-2.5-pro): API key invalid
+✅ Successfully using anthropic (claude-3-haiku-20240307)
+```
+</Tip>
+
+## Run with Docker (alternative)
+
+To run the entire stack with Docker Compose:
+
+```bash
+docker-compose up -d
+```
+
+This starts both the database and API server. The API will be available at `http://localhost:8000`.
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Architecture deep dive" icon="sitemap" href="/concepts/architecture">
+    Learn how vector embeddings and RAG work together
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Explore authentication, product creation, and search endpoints
+  </Card>
+  <Card title="Setup guide" icon="rocket" href="/guides/setup">
+    Detailed setup instructions for development and production
+  </Card>
+  <Card title="Configuration" icon="gear" href="/guides/configuration">
+    Customize models, failover strategy, and database settings
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection errors">
+    Ensure the database container is running and healthy:
+    
+    ```bash
+    docker-compose ps
+    docker-compose logs db
+    ```
+    
+    Verify the `DATABASE_URL` in your `.env` matches the Docker Compose configuration.
+  </Accordion>
+
+  <Accordion title="API key errors">
+    Check that your API keys are valid:
+    - Gemini: https://makersuite.google.com/app/apikey
+    - Anthropic: https://console.anthropic.com/settings/keys
+    
+    Ensure there are no extra spaces or quotes in the `.env` file.
+  </Accordion>
+
+  <Accordion title="Rate limit errors during seeding">
+    Increase the delay between product insertions in `seed_data.py`:
+    
+    ```python
+    time.sleep(1.0)  # Wait 1 second instead of 0.5
+    ```
+    
+    Or use a paid API tier with higher rate limits.
+  </Accordion>
+
+  <Accordion title="Port already in use">
+    If port 8000 or 5435 is already in use, change the ports in:
+    - API: Add `--port 8001` to the uvicorn command
+    - Database: Update the port mapping in `docker-compose.yml` and `DATABASE_URL`
+  </Accordion>
+</AccordionGroup>

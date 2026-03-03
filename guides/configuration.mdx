@@ -1,0 +1,292 @@
+---
+title: Configuration
+description: Configure environment variables and application settings for SKU Semantic Search
+---
+
+The SKU Semantic Search application uses Pydantic Settings for configuration management, allowing you to set values via environment variables or a `.env` file.
+
+## Settings class
+
+All configuration is managed through the `Settings` class in `app/core/config.py`:
+
+```python app/core/config.py
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "SKU Semantic Search"
+    VERSION: str = "1.0.0"
+    
+    # Base de datos y Seguridad
+    DATABASE_URL: str
+    GEMINI_API_KEY: str
+    ANTHROPIC_API_KEY: str
+    JWT_SECRET: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = 'utf-8'
+
+# Global settings instance
+settings = Settings()
+```
+
+<Info>
+  The `Settings` class automatically loads values from environment variables or a `.env` file in the project root
+</Info>
+
+## Environment variables
+
+### Required variables
+
+These variables must be set for the application to function:
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string with pgvector support.
+
+  **Format**: `postgresql://user:password@host:port/database`
+
+  **Example**:
+  ```bash
+  DATABASE_URL=postgresql://postgres:db_pass@localhost:5435/retail_rag
+  ```
+
+  <Note>
+    When running in Docker, use `db` as the host. When running locally, use `localhost`
+  </Note>
+</ParamField>
+
+<ParamField path="GEMINI_API_KEY" type="string" required>
+  Google Gemini API key for generating embeddings and AI responses.
+
+  **Obtain from**: [Google AI Studio](https://makersuite.google.com/app/apikey)
+
+  **Example**:
+  ```bash
+  GEMINI_API_KEY=AIzaSyA1234567890abcdefghijklmnop
+  ```
+
+  <Warning>
+    Keep this key secure and never commit it to version control
+  </Warning>
+</ParamField>
+
+<ParamField path="ANTHROPIC_API_KEY" type="string" required>
+  Anthropic Claude API key for advanced language model features.
+
+  **Obtain from**: [Anthropic Console](https://console.anthropic.com/)
+
+  **Example**:
+  ```bash
+  ANTHROPIC_API_KEY=sk-ant-api03-1234567890abcdefghijklmnop
+  ```
+</ParamField>
+
+<ParamField path="JWT_SECRET" type="string" required>
+  Secret key used to sign JWT tokens for authentication.
+
+  **Example**:
+  ```bash
+  JWT_SECRET=una_clave_secreta_muy_segura_para_el_mvp
+  ```
+
+  <Warning>
+    Use a strong, randomly generated secret in production. You can generate one using:
+    ```bash
+    python -c "import secrets; print(secrets.token_urlsafe(32))"
+    ```
+  </Warning>
+</ParamField>
+
+### Optional variables with defaults
+
+These variables have default values but can be customized:
+
+<ParamField path="PROJECT_NAME" type="string" default="SKU Semantic Search">
+  Name of the project displayed in API documentation.
+
+  **Example**:
+  ```bash
+  PROJECT_NAME=My Product Search API
+  ```
+</ParamField>
+
+<ParamField path="VERSION" type="string" default="1.0.0">
+  Application version displayed in API documentation.
+
+  **Example**:
+  ```bash
+  VERSION=1.2.0
+  ```
+</ParamField>
+
+<ParamField path="ALGORITHM" type="string" default="HS256">
+  JWT signing algorithm.
+
+  **Example**:
+  ```bash
+  ALGORITHM=HS256
+  ```
+
+  <Info>
+    HS256 is the standard HMAC with SHA-256 algorithm for JWT tokens
+  </Info>
+</ParamField>
+
+<ParamField path="ACCESS_TOKEN_EXPIRE_MINUTES" type="integer" default={30}>
+  JWT token expiration time in minutes.
+
+  **Example**:
+  ```bash
+  ACCESS_TOKEN_EXPIRE_MINUTES=60
+  ```
+</ParamField>
+
+## Configuration file
+
+Create a `.env` file in the project root with all required variables:
+
+```bash .env
+# Application
+PROJECT_NAME=SKU Semantic Search
+VERSION=1.0.0
+
+# Database
+DATABASE_URL=postgresql://postgres:db_pass@localhost:5435/retail_rag
+
+# AI Services
+GEMINI_API_KEY=your_gemini_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Security
+JWT_SECRET=your_secure_random_secret_key_here
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+<Warning>
+  Add `.env` to your `.gitignore` file to prevent accidentally committing secrets:
+  ```gitignore .gitignore
+  .env
+  .env.local
+  .env.*.local
+  ```
+</Warning>
+
+## Docker environment configuration
+
+When using Docker Compose, environment variables are set in the `docker-compose.yml` file:
+
+```yaml docker-compose.yml
+services:
+  api:
+    environment:
+      - DATABASE_URL=postgresql://postgres:db_pass@db:5435/retail_rag
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - JWT_SECRET=una_clave_secreta_muy_segura_para_el_mvp
+```
+
+<Note>
+  The `${GEMINI_API_KEY}` syntax reads the value from your local `.env` file or shell environment
+</Note>
+
+## Accessing settings in code
+
+Import and use the `settings` instance throughout your application:
+
+```python
+from app.core.config import settings
+
+# Access configuration values
+print(settings.PROJECT_NAME)  # "SKU Semantic Search"
+print(settings.DATABASE_URL)  # "postgresql://..."
+print(settings.ACCESS_TOKEN_EXPIRE_MINUTES)  # 30
+```
+
+### Example: Using settings in JWT creation
+
+The `Security` class uses settings for token generation:
+
+```python app/core/security.py
+from app.core.config import settings
+
+class Security:
+    @staticmethod
+    def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(
+                minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            )
+        
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(
+            to_encode, 
+            settings.JWT_SECRET, 
+            algorithm=settings.ALGORITHM
+        )
+        return encoded_jwt
+```
+
+See `app/core/security.py:20-29` for the complete implementation.
+
+## Environment-specific configuration
+
+You can maintain different configuration files for different environments:
+
+<CodeGroup>
+  ```bash .env.development
+  DATABASE_URL=postgresql://postgres:db_pass@localhost:5435/retail_rag_dev
+  GEMINI_API_KEY=dev_key_here
+  JWT_SECRET=dev_secret
+  ACCESS_TOKEN_EXPIRE_MINUTES=60
+  ```
+
+  ```bash .env.production
+  DATABASE_URL=postgresql://user:pass@prod-db-host:5432/retail_rag
+  GEMINI_API_KEY=prod_key_here
+  JWT_SECRET=strong_production_secret
+  ACCESS_TOKEN_EXPIRE_MINUTES=30
+  ```
+
+  ```bash .env.test
+  DATABASE_URL=postgresql://postgres:db_pass@localhost:5435/retail_rag_test
+  GEMINI_API_KEY=test_key_here
+  JWT_SECRET=test_secret
+  ACCESS_TOKEN_EXPIRE_MINUTES=15
+  ```
+</CodeGroup>
+
+Load the appropriate file based on your environment:
+
+```bash
+# Development
+cp .env.development .env
+
+# Production
+cp .env.production .env
+```
+
+## Validation
+
+Pydantic automatically validates configuration values on startup. If a required variable is missing, you'll see an error:
+
+```
+ValidationError: 1 validation error for Settings
+GEMINI_API_KEY
+  field required (type=value_error.missing)
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/guides/authentication">
+    Learn how JWT authentication uses these settings
+  </Card>
+  <Card title="Seeding data" icon="database" href="/guides/seeding-data">
+    Add products using the configured API keys
+  </Card>
+</CardGroup>

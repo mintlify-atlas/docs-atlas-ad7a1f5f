@@ -1,0 +1,93 @@
+---
+title: API overview
+description: Introduction to the SKU Semantic Search API
+---
+
+## Introduction
+
+The SKU Semantic Search API is a powerful REST API that enables intelligent product search using semantic embeddings and AI-powered recommendations. The API leverages vector similarity search and large language models to provide contextual product recommendations.
+
+## Base URL
+
+All API endpoints are relative to the base URL:
+
+```
+http://localhost:8000
+```
+
+## Authentication
+
+The SKU Semantic Search API uses **OAuth2 with Bearer tokens** for authentication. To access protected endpoints:
+
+1. Obtain an access token by calling the `/auth/login` endpoint with valid credentials
+2. Include the token in the `Authorization` header for subsequent requests
+
+### Example authenticated request
+
+```bash
+curl -X POST http://localhost:8000/products/ \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Product Name", "description": "Description", "category": "Category"}'
+```
+
+## Common headers
+
+Include these headers in your API requests:
+
+| Header | Value | Required | Description |
+|--------|-------|----------|-------------|
+| `Content-Type` | `application/json` | Yes | Specifies JSON request body |
+| `Authorization` | `Bearer {token}` | Yes* | Authentication token (required for protected endpoints) |
+| `Accept` | `application/json` | No | Specifies JSON response format |
+
+*Not required for `/auth/login` endpoint
+
+## Response format
+
+All API responses are returned in JSON format with appropriate HTTP status codes.
+
+### Success response
+
+```json
+{
+  "id": 1,
+  "name": "Example Product",
+  "description": "Product description",
+  "category": "Electronics"
+}
+```
+
+### Error response
+
+```json
+{
+  "detail": "Error message describing what went wrong"
+}
+```
+
+## Error codes
+
+The API uses standard HTTP status codes to indicate success or failure:
+
+| Status Code | Meaning | Description |
+|-------------|---------|-------------|
+| `200` | OK | Request successful |
+| `201` | Created | Resource created successfully |
+| `400` | Bad Request | Invalid request parameters |
+| `401` | Unauthorized | Authentication required or failed |
+| `404` | Not Found | Resource not found |
+| `422` | Unprocessable Entity | Validation error in request body |
+| `500` | Internal Server Error | Server-side error |
+
+## Rate limiting
+
+Currently, the API does not enforce rate limiting. This may change in future versions.
+
+## CORS
+
+The API supports Cross-Origin Resource Sharing (CORS) and accepts requests from:
+
+- `http://localhost:4200` (default Angular development server)
+
+All HTTP methods and headers are allowed for configured origins.

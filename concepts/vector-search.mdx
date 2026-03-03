@@ -1,0 +1,357 @@
+---
+title: Vector search with pgvector
+description: Understanding semantic search using 3072-dimensional embeddings and cosine similarity in PostgreSQL
+---
+
+## What is vector search?
+
+Vector search (also called semantic search) finds items based on **meaning** rather than exact keyword matches. Instead of searching for the word "laptop", a vector search for "portable work computer" would also find laptops because the semantic meaning is similar.
+
+<Info>
+  Traditional search looks for **exact text matches**. Vector search looks for **semantic similarity** using mathematical representations of meaning.
+</Info>
+
+## How embeddings work
+
+### From text to vectors
+
+An **embedding** is a dense numerical representation of text. In this project, product descriptions are converted into 3072-dimensional vectors using Google Gemini's embedding model.
+
+```python app/services/llm_service.py
+@staticmethod
+def get_embedding(text: str):
+    """
+    Generates the numerical vector (embedding) using Google Gemini.
+    Essential for pgvector search.
+    """
+    try:
+        # Important: Use the specific embedding model
+        result = genai.embed_content(
+            model="models/gemini-embedding-001",
+            content=text.replace("\n", " "),
+            task_type="retrieval_query"
+        )
+        return result['embedding']
+    except Exception as e:
+        print(f"❌ Error generating embedding: {e}")
+        raise e
+```
+
+<Note>
+  The `task_type="retrieval_query"` parameter optimizes the embedding for search queries specifically, as opposed to document classification or clustering tasks.
+</Note>
+
+### What does 3072 dimensions mean?
+
+Each dimension captures a different aspect of semantic meaning. For example:
+
+- Dimension 1 might represent "electronics" vs. "furniture"
+- Dimension 42 might represent "portable" vs. "stationary"
+- Dimension 1500 might represent "professional" vs. "casual"
+
+<Warning>
+  You cannot interpret individual dimensions directly — the magic happens in the **combination** of all 3072 values working together.
+</Warning>
+
+## Database schema
+
+The `Product` model in `app/models/product.py:5-14` defines the vector column:
+
+```python app/models/product.py
+from sqlalchemy import Column, Integer, String, Text
+from pgvector.sqlalchemy import Vector
+from app.db.session import Base
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(String, index=True)
+    
+    # Vector of 3072 dimensions for Gemini embeddings
+    embedding = Column(Vector(3072))
+```
+
+### pgvector extension
+
+PostgreSQL doesn't natively support vector operations. The `pgvector` extension adds:
+
+- `Vector` data type for storing embeddings
+- Distance functions (`cosine_distance`, `l2_distance`, `inner_product`)
+- Specialized indexes (`ivfflat`, `hnsw`) for fast similarity search
+
+The extension is automatically enabled in `app/main.py:9-11`:
+
+```python app/main.py
+def create_tables():
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+    Base.metadata.create_all(bind=engine)
+```
+
+## Cosine similarity search
+
+### The search algorithm
+
+When a user searches, the system:
+
+1. Converts the query text into a 3072-dimensional vector
+2. Compares this vector against all product vectors in the database
+3. Returns products with the smallest cosine distance (highest similarity)
+
+Here's the complete implementation from `app/services/product_service.py:25-39`:
+
+```python app/services/product_service.py
+@staticmethod
+def search_products(db: Session, query: str, limit: int = 5):
+    """
+    Search products using vector similarity (cosine)
+    """
+    # 1. Get the query vector using Gemini
+    query_embedding = LLMService.get_embedding(query)
+    
+    # 2. Search the database using pgvector
+    # Note: .cosine_distance is the standard for text embeddings
+    products = db.query(Product).order_by(
+        Product.embedding.cosine_distance(query_embedding)
+    ).limit(limit).all()
+    
+    return products
+```
+
+### Why cosine distance?
+
+<Tabs>
+  <Tab title="Cosine distance">
+    Measures the angle between two vectors. Perfect for text embeddings because it focuses on **direction** rather than magnitude.
+    
+    **Formula:** `1 - cosine_similarity(A, B)`
+    
+    **Range:** 0 (identical) to 2 (opposite)
+    
+    **Used for:** Text, semantic search, document similarity
+  </Tab>
+  
+  <Tab title="Euclidean distance (L2)">
+    Measures the straight-line distance between two points in space.
+    
+    **Formula:** `sqrt(sum((A[i] - B[i])^2))`
+    
+    **Used for:** Image embeddings, spatial data
+  </Tab>
+  
+  <Tab title="Inner product">
+    Measures both direction and magnitude. Can be faster to compute but sensitive to vector length.
+    
+    **Formula:** `sum(A[i] * B[i])`
+    
+    **Used for:** Normalized embeddings, recommendation systems
+  </Tab>
+</Tabs>
+
+<Info>
+  Cosine distance is ideal for text embeddings because two documents with similar meaning should point in the same direction in vector space, regardless of length.
+</Info>
+
+## Creating product embeddings
+
+When a new product is added, its embedding is generated and stored:
+
+```python app/services/product_service.py
+@staticmethod
+def create_product(db: Session, product_in: ProductCreate):
+    # 1. Generate embedding from description
+    text_to_embed = f"{product_in.name}: {product_in.description}"
+    embedding = LLMService.get_embedding(text_to_embed)
+
+    # 2. Save to database
+    db_product = Product(
+        name=product_in.name,
+        description=product_in.description,
+        category=product_in.category,
+        embedding=embedding
+    )
+    db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+```
+
+<Note>
+  The embedding is created from **both** the product name and description (`f"{name}: {description}"`) to capture complete semantic information.
+</Note>
+
+## Performance optimization
+
+### Index strategies
+
+For large product catalogs (10,000+ items), add a vector index:
+
+<CodeGroup>
+```sql IVFFlat (faster build)
+CREATE INDEX products_embedding_idx 
+ON products 
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+```sql HNSW (faster search)
+CREATE INDEX products_embedding_idx 
+ON products 
+USING hnsw (embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 64);
+```
+</CodeGroup>
+
+<Accordion title="When to use IVFFlat">
+  - Faster index creation
+  - Lower memory usage
+  - Good for up to 1 million vectors
+  - Acceptable for occasional searches
+  
+  **Trade-off:** Slightly slower query performance
+</Accordion>
+
+<Accordion title="When to use HNSW">
+  - Much faster search queries
+  - Better recall (accuracy)
+  - Ideal for production with high query volume
+  
+  **Trade-off:** Longer index build time, higher memory usage
+</Accordion>
+
+### Query optimization tips
+
+<Warning>
+  **Don't generate embeddings on every page load.** Cache frequently searched queries or pre-generate embeddings for common search terms.
+</Warning>
+
+```python
+# Good: Cache the embedding
+query_embedding = cache.get(query) or LLMService.get_embedding(query)
+
+# Bad: Regenerate every time
+query_embedding = LLMService.get_embedding(query)  # API call!
+```
+
+## Semantic search examples
+
+Let's explore how vector search handles different query types:
+
+<Accordion title="Example 1: Intent-based search">
+  **User query:** "I need something to organize cables on my desk"
+  
+  **Traditional keyword search:** No results (no product contains "organize cables")
+  
+  **Vector search results:**
+  1. Cable Management Box
+  2. Desk Organizer with Cable Slots
+  3. Velcro Cable Ties
+  
+  **Why it works:** The embedding captures the **intent** (organization + cables + desk) even without exact word matches.
+</Accordion>
+
+<Accordion title="Example 2: Synonym handling">
+  **User query:** "laptop computer"
+  
+  **Products found:**
+  - "Portable Notebook"
+  - "Ultrabook 15-inch"
+  - "Mobile Workstation"
+  
+  **Why it works:** "laptop", "notebook", and "portable computer" all have similar embeddings because they're semantically related.
+</Accordion>
+
+<Accordion title="Example 3: Multilingual understanding">
+  **User query:** "ratón inalámbrico" (Spanish for "wireless mouse")
+  
+  **Products found:**
+  - "Wireless Mouse Ergonomic"
+  - "Cordless Optical Mouse"
+  
+  **Why it works:** Gemini's embedding model is multilingual and understands cross-language semantic similarity.
+  
+  <Note>
+    This works best if your product descriptions include multiple languages or if the embedding model was trained on multilingual data.
+  </Note>
+</Accordion>
+
+## Measuring search quality
+
+### Relevance scoring
+
+The cosine distance value indicates how relevant a product is:
+
+```python
+# Example query result
+products = search_products(db, "wireless keyboard")
+
+for product in products:
+    distance = product.embedding.cosine_distance(query_embedding)
+    print(f"{product.name}: distance = {distance:.4f}")
+
+# Output:
+# Wireless Mechanical Keyboard: distance = 0.1234
+# Bluetooth Keyboard Compact: distance = 0.2456
+# USB Wired Keyboard: distance = 0.5678
+```
+
+<Info>
+  Lower distance = higher similarity. A distance of **0** means identical, while **2** means completely opposite.
+</Info>
+
+### A/B testing strategies
+
+1. **Track click-through rates** on search results
+2. **Monitor zero-result queries** (searches returning no good matches)
+3. **Analyze query-to-purchase conversion** for semantic vs. keyword search
+4. **Collect user feedback** with "Was this helpful?" buttons
+
+## Limitations and edge cases
+
+<Warning>
+  **Cold start problem:** New products without embeddings won't appear in search results until their embeddings are generated.
+</Warning>
+
+Mitigation:
+```python
+# Generate embedding immediately on product creation
+@router.post("/", response_model=ProductResponse)
+def create_product(product_in: ProductCreate, db: Session = Depends(get_db)):
+    return ProductService.create_product(db, product_in)  # Generates embedding
+```
+
+### Query ambiguity
+
+Some queries are genuinely ambiguous:
+
+**Query:** "Apple"
+
+Could mean:
+- The fruit (for a grocery store)
+- Apple Inc. products (for electronics)
+- A color (apple red)
+
+<Info>
+  Consider adding **category filters** or **context from user's browsing history** to disambiguate.
+</Info>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="RAG pattern" icon="book" href="/concepts/rag-pattern">
+    Learn how vector search integrates with LLM generation
+  </Card>
+  <Card title="System architecture" icon="sitemap" href="/concepts/architecture">
+    See how vector search fits into the overall system
+  </Card>
+  <Card title="Search API" icon="code" href="/api/products/search">
+    Explore the search endpoint documentation
+  </Card>
+  <Card title="Multi-LLM failover" icon="shield" href="/concepts/multi-llm-failover">
+    Understand the resilient AI provider system
+  </Card>
+</CardGroup>
